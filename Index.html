@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Tank Battle Simulator</title>
+    <title>The Last Tiger in Berlin</title>
     <style>
         body {
             margin: 0;
@@ -200,6 +200,44 @@
             100% { transform: translate(-50%, -80%); opacity: 0; }
         }
 
+        /* NEW CSS for Alert Messages */
+        #alert-indicator {
+            position: absolute;
+            top: 75%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            font-size: 1.5rem;
+            text-shadow: 2px 2px 0px #000;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 5;
+        }
+        .show-alert {
+            animation: alertAnim 2s ease-out forwards;
+        }
+        @keyframes alertAnim {
+            0% { opacity: 0; transform: translate(-50%, -40%); }
+            10% { opacity: 1; transform: translate(-50%, -50%); }
+            80% { opacity: 1; transform: translate(-50%, -50%); }
+            100% { opacity: 0; transform: translate(-50%, -60%); }
+        }
+
+        /* NEW CSS for Repair */
+        #repair-indicator {
+            display: none;
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ffaa00;
+            font-weight: bold;
+            font-size: 2rem;
+            text-shadow: 2px 2px 0px #000;
+            pointer-events: none;
+            z-index: 5;
+        }
+
         /* NEW CSS for Aiming */
         #gun-reticle {
             position: absolute;
@@ -251,38 +289,41 @@
             </div>
             <div class="hud-box" style="text-align: right;">
                 <div style="font-size: 1.2rem;">Enemies Destroyed: <span id="score-val" style="color:#ffaa00; font-weight:bold;">0</span></div>
-                <div id="ammo-status" style="margin-top: 5px; color: #aaa;">Ready to fire</div>
+                <div id="ammo-status" style="margin-top: 5px; color: #aaa;">Main: Ready</div>
             </div>
         </div>
         <div id="crosshair"></div>
         <div id="hit-indicator" class="hit-marker"></div>
         <div id="bounce-indicator">RICOCHET</div>
+        <div id="alert-indicator"></div>
+        <div id="repair-indicator">REPAIRING: 20s</div>
         
         <!-- NEW Aiming UI -->
         <div id="gun-reticle"></div>
         <div id="sniper-overlay">
-            <div class="line-h"></div>
-            <div class="line-v"></div>
-        </div>
+        <div class="line-h"></div>
+        <div class="line-v"></div>
     </div>
 
     <div id="menu">
-        <h1>STEEL BEASTS</h1>
+        <h1>The Last Tiger in Berlin</h1>
         <p>A 3D Tank Combat Simulator</p>
         <div class="controls-info">
             <div><span>W / S</span> - Drive Forward / Backward</div>
             <div><span>A / D</span> - Steer Hull Left / Right</div>
             <div><span>Mouse</span> - Aim Turret</div>
-            <div><span>Left Click</span> - Fire Main Gun</div>
+            <div><span>Left Click</span> - Fire Main Cannon</div>
+            <div><span>Space</span> - Fire Machine Gun</div>
             <div><span>Shift</span> - Toggle Sniper Sight</div>
+            <div><span>R</span> - Field Repair (20s)</div>
         </div>
         <button id="start-btn">ENGAGE</button>
     </div>
 
     <div id="game-over">
-        <h2>VEHICLE DESTROYED</h2>
+        <h2>YOUR DEAD</h2>
         <p>Your tank was disabled.</p>
-        <p>Final Score: <span id="final-score">0</span></p>
+        <p>Kills: <span id="final-score">0</span></p>
         <button id="restart-btn" onclick="location.reload()">Return to Base</button>
     </div>
 
@@ -294,14 +335,18 @@
         turretSpeed: 2.0, // How fast turret tracks the camera look point
         reloadTime: 3.5, // Player reload time in seconds
         enemyReloadTime: 4.0, // Enemy reload time in seconds (slower)
-        projectileSpeed: 100, // Enemy projectile speed
+        projectileSpeed: 160, // Enemy projectile speed (INCREASED to make them deadlier)
         playerProjectileSpeed: 300, // Tiger 88mm high-velocity gun (less drop)
+        mgSpeed: 400, // Machine gun tracer speed
+        mgReloadTime: 0.08, // Very fast MG fire rate
+        mgCapacity: 100, // NEW: MG Magazine size
+        mgLongReloadTime: 10.0, // NEW: Reload time when empty
         gravity: 9.8 * 2,
         worldSize: 400,
-        enemyCount: 6,
+        enemyCount: 8,
         colors: {
             playerTank: 0x4a5d23, // Olive green
-            enemyTank: 0x555555,  // Dark grey
+            enemyTank: 0x2e5c2e,  // Dark green
             track: 0x222222,
             barrel: 0x333333,
             ground: 0x6b8e23,     // Grass
@@ -325,7 +370,7 @@
     const centerScreen = new THREE.Vector2(0, 0);
 
     // Input state
-    const keys = { w: false, a: false, s: false, d: false };
+    const keys = { w: false, a: false, s: false, d: false, ' ': false, r: false };
     let mouseMovement = { x: 0, y: 0 };
     
     // UI Elements
@@ -334,9 +379,13 @@
     const ammoStatus = document.getElementById('ammo-status');
     const hitIndicator = document.getElementById('hit-indicator');
     const bounceIndicator = document.getElementById('bounce-indicator');
+    const alertIndicator = document.getElementById('alert-indicator');
+    const repairIndicator = document.getElementById('repair-indicator');
 
-    // Audio Elements
-    let turretAudio;
+    // Audio Elements (Synthesizer globals)
+    let audioCtx;
+    let engineSynthGain;
+    let engineOsc;
 
     // --- Initialization ---
     function init() {
@@ -412,17 +461,31 @@
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mousedown', onMouseDown);
 
-        // Initialize Audio
-        turretAudio = new Audio('tank-turret-rotate-14879 (1).mp3');
-        turretAudio.loop = true;
-        turretAudio.volume = 0.5;
-
         // UI Setup
         document.getElementById('start-btn').addEventListener('click', () => {
-            // Unlock audio on first user click (browsers block audio until direct interaction)
-            turretAudio.play().then(() => {
-                turretAudio.pause();
-            }).catch(e => {});
+            // Initialize Web Audio Synthesizer for Turret Motor on first click
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+                // --- NEW: Engine Synthesizer ---
+                engineSynthGain = audioCtx.createGain();
+                engineSynthGain.gain.value = 0.3; // Base idle volume
+                engineSynthGain.connect(audioCtx.destination);
+
+                const engineFilter = audioCtx.createBiquadFilter();
+                engineFilter.type = 'lowpass';
+                engineFilter.frequency.value = 300; // Deep rumble
+                engineFilter.connect(engineSynthGain);
+
+                engineOsc = audioCtx.createOscillator();
+                engineOsc.type = 'sawtooth';
+                engineOsc.frequency.value = 60; // Idle RPM frequency
+                engineOsc.connect(engineFilter);
+                engineOsc.start();
+
+            } else if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
 
             document.body.requestPointerLock();
         });
@@ -434,7 +497,7 @@
             } else {
                 if(player.health > 0) document.getElementById('menu').style.display = 'flex';
                 isPlaying = false;
-                if (turretAudio) turretAudio.pause(); // Pause audio if menu opens
+                if (engineSynthGain && audioCtx) engineSynthGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1); // Silence engine
             }
         });
 
@@ -503,13 +566,21 @@
             maxHealth: isPlayer ? 100 : 50,
             speed: 0,
             lastFired: 0,
+            mgLastFired: 0, // Track MG cooldown
+            mgAmmo: 100, // NEW: Track MG ammo
+            mgIsReloading: false, // NEW: Track if reloading
+            mgReloadTimer: 0, // NEW: Reload countdown
+            tracksDisabled: false, // Track status
+            isRepairing: false, // Track repair status
+            repairTimer: 0, // Repair countdown
             recoilTimer: 0,
             group: new THREE.Group(),
             hull: new THREE.Group(),
             turretGroup: new THREE.Group(),
             aiState: 'patrol',
             aiTimer: 0,
-            targetPos: new THREE.Vector3()
+            targetPos: new THREE.Vector3(),
+            leadSkill: isPlayer ? 1 : 0.7 + Math.random() * 0.5 // INCREASED: 70% to 120% accurate leading
         };
 
         const darkMat = new THREE.MeshLambertMaterial({ color: CONFIG.colors.track });
@@ -534,9 +605,11 @@
             const leftTrack = new THREE.Mesh(trackGeo, darkMat);
             leftTrack.position.set(-2.0, 0.8, 0);
             leftTrack.castShadow = true;
+            leftTrack.userData.isTrack = true; // Tag for damage system
             const rightTrack = new THREE.Mesh(trackGeo, darkMat);
             rightTrack.position.set(2.0, 0.8, 0);
             rightTrack.castShadow = true;
+            rightTrack.userData.isTrack = true; // Tag for damage system
             tank.hull.add(leftTrack);
             tank.hull.add(rightTrack);
 
@@ -617,9 +690,11 @@
             const leftTrack = new THREE.Mesh(trackGeo, darkMat);
             leftTrack.position.set(-1.8, 0.7, 0);
             leftTrack.castShadow = true;
+            leftTrack.userData.isTrack = true; // Tag for damage system
             const rightTrack = new THREE.Mesh(trackGeo, darkMat);
             rightTrack.position.set(1.8, 0.7, 0);
             rightTrack.castShadow = true;
+            rightTrack.userData.isTrack = true; // Tag for damage system
             tank.hull.add(leftTrack);
             tank.hull.add(rightTrack);
 
@@ -710,6 +785,9 @@
         tankObj.lastFired = now;
         tankObj.recoilTimer = 0.2; // 200ms recoil animation
 
+        // Play Synthesized Cannon Sound
+        playCannonSound(tankObj.isPlayer);
+
         // Visual Effects: Muzzle flash
         createExplosion(tankObj.firePoint.getWorldPosition(new THREE.Vector3()), 0xffaa00, 10, 0.5);
 
@@ -735,15 +813,16 @@
             mesh: mesh,
             velocity: direction.multiplyScalar(speed),
             owner: tankObj,
-            life: 3.0 // seconds before auto-destroy
+            life: 3.0, // seconds before auto-destroy
+            type: 'cannon' // Explicitly mark as cannon shell
         });
 
         if (tankObj.isPlayer) {
-            ammoStatus.innerText = "Reloading...";
+            ammoStatus.innerText = "Main: Reloading...";
             ammoStatus.style.color = "#ff3333";
             setTimeout(() => {
                 if(isPlaying) {
-                    ammoStatus.innerText = "Ready to fire";
+                    ammoStatus.innerText = "Main: Ready";
                     ammoStatus.style.color = "#aaa";
                 }
             }, CONFIG.reloadTime * 1000);
@@ -769,21 +848,181 @@
 
     // --- Update Logic ---
 
+    // NEW FUNCTION: Fire Coaxial Machine Gun
+    function fireMG(tankObj) {
+        if (tankObj.mgIsReloading) return; // Prevent firing while reloading
+
+        const now = clock.getElapsedTime();
+        if (now - tankObj.mgLastFired < CONFIG.mgReloadTime) return;
+        tankObj.mgLastFired = now;
+
+        tankObj.mgAmmo--; // Consume ammo
+
+        if (tankObj.mgAmmo <= 0) {
+            tankObj.mgIsReloading = true;
+            tankObj.mgReloadTimer = CONFIG.mgLongReloadTime;
+            if (tankObj.isPlayer) {
+                showAlertMarker("RELOADING MG", "#ff3333");
+            }
+        }
+
+        playMGSound(tankObj.isPlayer);
+
+        // Calculate offset (coaxial MG sits just next to the main barrel)
+        const startPos = new THREE.Vector3();
+        tankObj.firePoint.getWorldPosition(startPos);
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(tankObj.gunPivot.getWorldQuaternion(new THREE.Quaternion()));
+        startPos.add(right.multiplyScalar(0.3));
+
+        const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(tankObj.firePoint.getWorldQuaternion(new THREE.Quaternion())).normalize();
+
+        // Add slight inaccuracy spread to the MG
+        direction.x += (Math.random() - 0.5) * 0.015;
+        direction.y += (Math.random() - 0.5) * 0.015;
+        direction.z += (Math.random() - 0.5) * 0.015;
+        direction.normalize();
+
+        const projGeo = new THREE.SphereGeometry(0.06, 4, 4); 
+        const projMat = new THREE.MeshBasicMaterial({ color: 0xffddaa }); // Glowing yellow tracer
+        const mesh = new THREE.Mesh(projGeo, projMat);
+        mesh.position.copy(startPos);
+        scene.add(mesh);
+
+        projectiles.push({
+            mesh: mesh,
+            velocity: direction.multiplyScalar(CONFIG.mgSpeed),
+            owner: tankObj,
+            life: 1.5,
+            type: 'mg'
+        });
+    }
+
+    // NEW FUNCTION: Synthesize Machine Gun Sound
+    function playMGSound(isPlayer) {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime;
+        const vol = isPlayer ? 0.15 : 0.02;
+
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        
+        osc.frequency.setValueAtTime(800, t);
+        osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
+
+        gain.gain.setValueAtTime(vol, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + 0.1);
+    }
+
+    // NEW FUNCTION: Synthesize Cannon Explosion
+    function playCannonSound(isPlayer) {
+        if (!audioCtx) return;
+
+        const t = audioCtx.currentTime;
+        const vol = isPlayer ? 1.0 : 0.2; // Quieter if enemy fired
+
+        // 1. The "Thump" (Sub-bass impact)
+        const osc = audioCtx.createOscillator();
+        const oscGain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.connect(oscGain);
+        oscGain.connect(audioCtx.destination);
+
+        osc.frequency.setValueAtTime(150, t);
+        osc.frequency.exponentialRampToValueAtTime(30, t + 0.3); // Pitch drop for impact punch
+        
+        oscGain.gain.setValueAtTime(vol, t);
+        oscGain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+
+        osc.start(t);
+        osc.stop(t + 0.5);
+
+        // 2. The "Bang" (White noise burst)
+        const bufferSize = audioCtx.sampleRate * 1.0; // 1 second of noise
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1; // Generate white noise
+        }
+
+        const noiseSource = audioCtx.createBufferSource();
+        noiseSource.buffer = buffer;
+        
+        const noiseFilter = audioCtx.createBiquadFilter();
+        noiseFilter.type = 'lowpass';
+        noiseFilter.frequency.value = 800; // Muffle the high harshness to sound like a heavy boom
+
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.setValueAtTime(vol, t);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.8);
+
+        noiseSource.connect(noiseFilter);
+        noiseFilter.connect(noiseGain);
+        noiseGain.connect(audioCtx.destination);
+
+        noiseSource.start(t);
+        noiseSource.stop(t + 1.0);
+    }
+
+    // NEW FUNCTION: Alert text popup
+    function showAlertMarker(text, color = '#ffaa00') {
+        alertIndicator.innerText = text;
+        alertIndicator.style.color = color;
+        alertIndicator.classList.remove('show-alert');
+        void alertIndicator.offsetWidth; 
+        alertIndicator.classList.add('show-alert');
+    }
+
     function updatePlayer(dt) {
         if (player.health <= 0) return;
+
+        // --- NEW: Repair Logic ---
+        if (keys.r && !player.isRepairing && (player.health < player.maxHealth || player.tracksDisabled)) {
+            player.isRepairing = true;
+            player.repairTimer = 20.0;
+            repairIndicator.style.display = 'block';
+        }
+
+        if (player.isRepairing) {
+            player.repairTimer -= dt;
+            repairIndicator.innerText = `REPAIRING: ${Math.ceil(player.repairTimer)}s`;
+            
+            if (player.repairTimer <= 0) {
+                player.isRepairing = false;
+                player.health = player.maxHealth;
+                player.tracksDisabled = false;
+                repairIndicator.style.display = 'none';
+                updateHUD();
+                showAlertMarker("REPAIRS COMPLETE", "#44ff44");
+                
+                // Fix tracks visually
+                const darkMat = new THREE.MeshLambertMaterial({ color: CONFIG.colors.track });
+                player.hull.children.forEach(c => { 
+                    if(c.userData.isTrack) c.material = darkMat; 
+                });
+            }
+        }
 
         // --- Hull Movement ---
         // Acceleration
         let moveDir = 0;
-        if (keys.w) moveDir += 1;
-        if (keys.s) moveDir -= 1;
+        if (!player.tracksDisabled && !player.isRepairing) {
+            if (keys.w) moveDir += 1;
+            if (keys.s) moveDir -= 1;
+        }
         
         // Target speed
         let targetSpeed = moveDir * CONFIG.playerSpeed;
+        if (player.isRepairing) targetSpeed = 0; // Force brakes while repairing
         player.speed += (targetSpeed - player.speed) * 5 * dt;
 
         // Turning
-        if (Math.abs(player.speed) > 0.1) {
+        if (Math.abs(player.speed) > 0.1 && !player.tracksDisabled && !player.isRepairing) {
             let turnDir = 0;
             if (keys.a) turnDir += 1;
             if (keys.d) turnDir -= 1;
@@ -798,10 +1037,34 @@
         movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.hull.rotation.y);
         movement.multiplyScalar(player.speed * dt);
 
+        // --- Engine Audio Pitch & Volume Logic ---
+        if (engineOsc && engineSynthGain && audioCtx) {
+            const speedRatio = Math.abs(player.speed) / CONFIG.playerSpeed;
+            // Pitch shifts from 60Hz to 100Hz as you speed up
+            engineOsc.frequency.setTargetAtTime(60 + (speedRatio * 40), audioCtx.currentTime, 0.1);
+            // Volume gets slightly louder and more aggressive
+            engineSynthGain.gain.setTargetAtTime(0.3 + (speedRatio * 0.2), audioCtx.currentTime, 0.1);
+        }
+
         // Predict next position for collision
         const nextPos = player.group.position.clone().add(movement);
         if (!checkEnvironmentCollision(nextPos, player.radius)) {
             player.group.position.copy(nextPos);
+        }
+
+        // --- NEW: MG Reload Logic ---
+        if (player.mgIsReloading) {
+            player.mgReloadTimer -= dt;
+            if (player.mgReloadTimer <= 0) {
+                player.mgIsReloading = false;
+                player.mgAmmo = CONFIG.mgCapacity;
+                showAlertMarker("MG READY", "#44ff44");
+            }
+        }
+
+        // --- Fire MG ---
+        if (keys[' ']) {
+            fireMG(player);
         }
 
         // --- Turret Aiming (War Thunder Style) ---
@@ -824,7 +1087,9 @@
         const localTarget = tankWorldToLocal(player.group, aimTarget);
         const targetYaw = Math.atan2(localTarget.x, localTarget.z) + Math.PI;
         
-        const prevYaw = player.turretGroup.rotation.y;
+        // Calculate distance to target before moving
+        const yawDist = Math.abs(normalizeAngle(targetYaw - player.turretGroup.rotation.y));
+        
         player.turretGroup.rotation.y = lerpAngle(player.turretGroup.rotation.y, targetYaw, CONFIG.turretSpeed * dt);
 
         // 3. Rotate Gun (Pitch) to track the world point
@@ -832,30 +1097,10 @@
         const targetPitch = Math.atan2(localTurretTarget.y, -localTurretTarget.z);
         const clampedPitch = Math.max(-Math.PI/18, Math.min(Math.PI/9, targetPitch));
         
-        const prevPitch = player.gunPivot.rotation.x;
+        // Calculate distance to target before moving
+        const pitchDist = Math.abs(clampedPitch - player.gunPivot.rotation.x);
+        
         player.gunPivot.rotation.x = lerpAngle(player.gunPivot.rotation.x, clampedPitch, CONFIG.turretSpeed * 2 * dt);
-
-        // --- Turret Rotation Audio Logic ---
-        const yawDiff = Math.abs(normalizeAngle(player.turretGroup.rotation.y - prevYaw));
-        const pitchDiff = Math.abs(player.gunPivot.rotation.x - prevPitch);
-        
-        // Increase threshold slightly to avoid micro-stuttering and play() interruptions
-        const isTurretMoving = (yawDiff > 0.001 || pitchDiff > 0.001);
-        
-        if (isTurretMoving) {
-            // Play if it is moving significantly
-            if (turretAudio.paused) {
-                const playPromise = turretAudio.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(e => {}); // Catch interruption errors smoothly
-                }
-            }
-        } else {
-            // Stop playing once it locks onto the target
-            if (!turretAudio.paused) {
-                turretAudio.pause();
-            }
-        }
 
         // 4. Evaluate actual gun resting position for UI Reticle
         const gunOrigin = new THREE.Vector3();
@@ -916,22 +1161,40 @@
         enemies.forEach((enemy, index) => {
             if (enemy.health <= 0) return;
 
+            // --- MG Reload Logic ---
+            if (enemy.mgIsReloading) {
+                enemy.mgReloadTimer -= dt;
+                if (enemy.mgReloadTimer <= 0) {
+                    enemy.mgIsReloading = false;
+                    enemy.mgAmmo = CONFIG.mgCapacity;
+                }
+            }
+
             enemy.aiTimer -= dt;
             const distToPlayer = enemy.group.position.distanceTo(player.group.position);
 
             // Basic State Machine
             if (enemy.aiTimer <= 0) {
-                if (distToPlayer < 80) {
+                if (distToPlayer < 250) { // INCREASED: Enemies now spot you from further away
                     enemy.aiState = 'attack';
-                    enemy.aiTimer = 1 + Math.random(); // Re-evaluate soon
+                    enemy.aiTimer = 2 + Math.random() * 3; // Reposition/Flank every 2-5 seconds
+                    
+                    // Pick a tactical flanking position relative to player
+                    const flankAngle = Math.random() * Math.PI * 2;
+                    const optimalDist = 60 + Math.random() * 60; // Try to stay 60-120 units away
+                    enemy.targetPos.set(
+                        player.group.position.x + Math.cos(flankAngle) * optimalDist,
+                        0,
+                        player.group.position.z + Math.sin(flankAngle) * optimalDist
+                    );
                 } else {
                     enemy.aiState = 'patrol';
                     enemy.aiTimer = 3 + Math.random() * 4;
                     // Pick a random direction
                     enemy.targetPos.set(
-                        enemy.group.position.x + (Math.random() - 0.5) * 60,
+                        enemy.group.position.x + (Math.random() - 0.5) * 80,
                         0,
-                        enemy.group.position.z + (Math.random() - 0.5) * 60
+                        enemy.group.position.z + (Math.random() - 0.5) * 80
                     );
                 }
             }
@@ -948,12 +1211,33 @@
                 enemy.speed = 5;
             } 
             else if (enemy.aiState === 'attack') {
-                enemy.speed = 0; // Stop to shoot
+                // --- NEW: Maneuver while attacking ---
+                const distToTactical = enemy.group.position.distanceTo(enemy.targetPos);
+                if (distToTactical > 15) {
+                    const dir = enemy.targetPos.clone().sub(enemy.group.position).normalize();
+                    const navYaw = Math.atan2(dir.x, dir.z) + Math.PI;
+                    enemy.hull.rotation.y = lerpAngle(enemy.hull.rotation.y, navYaw, CONFIG.playerTurnSpeed * dt);
+                    enemy.speed = 6; // Keep moving to flank!
+                } else {
+                    enemy.speed = 0; // Hold position once reached
+                }
 
-                // Aim at player
-                // Aim a bit high to account for gravity/distance (simple heuristic)
+                // --- Target Leading Logic ---
+                // 1. Calculate the player's current velocity vector
+                const playerVel = new THREE.Vector3(0, 0, -1);
+                playerVel.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.hull.rotation.y);
+                playerVel.multiplyScalar(player.speed);
+
+                // 2. Calculate how long the shell will take to reach the player
+                const timeToTarget = distToPlayer / CONFIG.projectileSpeed;
+
+                // 3. Predict future position based on velocity, time, and the enemy's flawed skill
+                const leadOffset = playerVel.multiplyScalar(timeToTarget * enemy.leadSkill);
+
+                // Aim at predicted player position
                 const targetPos = player.group.position.clone();
-                targetPos.y += 1.5; 
+                targetPos.add(leadOffset); // Apply the predicted lead
+                targetPos.y += 1.5; // Aim a bit high to account for gravity
 
                 const localTarget = tankWorldToLocal(enemy.group, targetPos);
                 const targetYaw = Math.atan2(localTarget.x, localTarget.z) + Math.PI;
@@ -965,13 +1249,13 @@
 
                 // Fire if roughly aimed
                 const angleDiff = Math.abs(normalizeAngle(enemy.turretGroup.rotation.y - targetYaw));
-                if (angleDiff < 0.1 && distToPlayer < 100 && player.health > 0) {
+                if (angleDiff < 0.15 && distToPlayer < 250 && player.health > 0) { // INCREASED: Firing angle threshold and distance
                     fireProjectile(enemy);
                 }
             }
 
             // Apply movement
-            if (enemy.speed > 0) {
+            if (enemy.speed > 0 && !enemy.tracksDisabled) {
                 const movement = new THREE.Vector3(0, 0, -1);
                 movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), enemy.hull.rotation.y);
                 movement.multiplyScalar(enemy.speed * dt);
@@ -1065,30 +1349,93 @@
                         // If hitting the corners/angled hull (between 30 and 60 degrees from flat)
                         const isAngled = (angleDeg > 30 && angleDeg < 60);
 
-                        if (isAngled && Math.random() < 0.8) {
-                            hitType = 'bounce';
+                        // --- HIT ZONES LOGIC ---
+                        const localHit = tankWorldToLocal(tank.hull, nextPos);
+                        const isSideHit = angleDeg > 60 && angleDeg < 120; // Hitting the flat side
+                        const isHighHit = localHit.y > 0.4; // Upper half of the hull (under turret)
+                        const isCenterZ = Math.abs(localHit.z) < 2.0; // Middle section of the tank
+                        
+                        // NEW: Track hit logic (low and far to the left/right sides)
+                        const isTrackHit = Math.abs(localHit.x) > 1.2 && localHit.y < 0.2; 
+                        
+                        // NEW: Front Armor hit logic (facing the Tiger)
+                        // -Z is the front of the tank. angleDeg < 45 means hitting roughly head-on.
+                        const isFrontArmor = localHit.z < 0 && angleDeg < 45;
+
+                        if (isTrackHit && !tank.tracksDisabled) {
+                            tank.tracksDisabled = true;
+                            hitType = 'bounce'; // Sparks to show parts breaking
                             if (p.owner.isPlayer) {
-                                showBounceMarker("RICOCHET!");
-                            } else if (tank.isPlayer) {
-                                showBounceMarker("ARMOR ANGLED!");
+                                showHitMarker();
+                                showBounceMarker("TRACKS DISABLED!");
                             }
-                        } else {
+                            
+                            // Turn tracks scorched
+                            const scorchedMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+                            tank.hull.children.forEach(c => { 
+                                if(c.userData.isTrack) c.material = scorchedMat; 
+                            });
+
+                            if (p.type === 'cannon') tank.health -= 10; // Cannon does minor damage to treads
+                        }
+                        else if (p.type === 'mg') {
+                            hitType = 'bounce'; // MG bounces harmlessly off all tank armor 
+                        }
+                        // Only allow enemies to be ammo racked by adding !tank.isPlayer
+                        else if (!tank.isPlayer && isSideHit && isHighHit && isCenterZ && Math.random() < 0.90) {
                             hitType = 'tank';
-                            // Apply Damage
-                            tank.health -= 25; // 4 hits to kill player, 2 for enemy
+                            tank.health = 0; // Instant kill
+                            tank.ammoRacked = true; // Flag for special explosion
                             
                             if (p.owner.isPlayer) {
                                 showHitMarker();
+                                showBounceMarker("AMMO RACK DESTROYED!");
+                                score++;
+                                scoreVal.innerText = score;
+                            }
+                            // Actually call destruction here since we bypass the normal damage block
+                            destroyTank(tank); 
+                        } else {
+                            // --- BOUNCE / PENETRATION LOGIC ---
+                            let doesBounce = false;
+
+                            if (p.owner.isPlayer && p.type === 'cannon') {
+                                // Tiger Shell Logic: Only bounce if hitting the front armor, 50% chance
+                                if (isFrontArmor && Math.random() < 0.5) {
+                                    doesBounce = true;
+                                }
+                            } else if (!p.owner.isPlayer && p.type === 'cannon') {
+                                // Enemy Shell Logic: Bounces if angled
+                                if (isAngled && Math.random() < 0.8) {
+                                    doesBounce = true;
+                                }
                             }
 
-                            if (tank.health <= 0) {
-                                destroyTank(tank);
-                                if(p.owner.isPlayer && !tank.isPlayer) {
-                                    score++;
-                                    scoreVal.innerText = score;
+                            if (doesBounce) {
+                                hitType = 'bounce';
+                                if (p.owner.isPlayer) {
+                                    showBounceMarker("RICOCHET!");
+                                } else if (tank.isPlayer) {
+                                    showBounceMarker("ARMOR ANGLED!");
                                 }
-                            } else if (tank.isPlayer) {
-                                updateHUD();
+                            } else {
+                                // Penetrating Hit
+                                hitType = 'tank';
+                                tank.health -= 25; // 4 hits to kill player, 2 for enemy
+                                
+                                if (p.owner.isPlayer) {
+                                    showHitMarker();
+                                }
+
+                                if (tank.health <= 0) {
+                                    destroyTank(tank);
+                                    if(p.owner.isPlayer && !tank.isPlayer) {
+                                        score++;
+                                        scoreVal.innerText = score;
+                                    }
+                                } else if (tank.isPlayer) {
+                                    updateHUD();
+                                }
                             }
                         }
                         break; // Stop checking other tanks
@@ -1098,11 +1445,11 @@
 
             if (hit) {
                 if (hitType === 'bounce') {
-                    createExplosion(hitPos, 0xffffff, 10, 0.5); // White sparks for ricochet
+                    createExplosion(hitPos, 0xffffff, p.type === 'mg' ? 3 : 10, 0.5); // Less sparks for MG ricochet
                 } else if (hitType === 'tank') {
                     createExplosion(hitPos, 0xff5500, 20, 1.5); // Normal fiery explosion
                 } else {
-                    createExplosion(hitPos, 0x8b7355, 15, 1.0); // Dirt/wood debris for environment
+                    createExplosion(hitPos, 0x8b7355, p.type === 'mg' ? 5 : 15, 1.0); // Dirt/wood debris for environment
                 }
                 removeProjectile(i);
             } else {
@@ -1127,15 +1474,26 @@
             }
 
             p.velocity.y -= CONFIG.gravity * 0.5 * dt;
-            p.mesh.position.add(p.velocity.clone().multiplyScalar(dt));
-            p.mesh.rotation.x += p.rotSpeed.x * dt;
-            p.mesh.rotation.y += p.rotSpeed.y * dt;
             
-            // Fade out/shrink
-            const scale = p.life / p.maxLife;
-            p.mesh.scale.set(scale, scale, scale);
-            if(p.mesh.material.transparent) {
-                p.mesh.material.opacity = scale;
+            // NEW: Stop heavy debris when it hits the ground
+            if (p.isDebris && p.mesh.position.y <= 0) {
+                p.mesh.position.y = 0;
+                p.velocity.set(0, 0, 0);
+                p.rotSpeed.set(0, 0, 0);
+            } else {
+                p.mesh.position.add(p.velocity.clone().multiplyScalar(dt));
+                p.mesh.rotation.x += p.rotSpeed.x * dt;
+                p.mesh.rotation.y += p.rotSpeed.y * dt;
+                p.mesh.rotation.z += p.rotSpeed.z * dt;
+            }
+            
+            // Fade out/shrink (Skip for solid debris like turrets)
+            if (!p.isDebris) {
+                const scale = p.life / p.maxLife;
+                p.mesh.scale.set(scale, scale, scale);
+                if(p.mesh.material.transparent) {
+                    p.mesh.material.opacity = scale;
+                }
             }
         }
     }
@@ -1186,9 +1544,35 @@
         if(tank.barrelMesh) tank.barrelMesh.material = scorchedMat;
         if(tank.barrelMesh && tank.barrelMesh.children.length > 0) tank.barrelMesh.children[0].material = scorchedMat; // For the muzzle brake
 
+        // --- NEW: Ammo Rack effect (Turret pops off) ---
+        if (tank.ammoRacked) {
+            // Extra massive explosion
+            createExplosion(tank.group.position, 0xffaa00, 80, 4);
+            
+            // Detach turret and add to scene to give it independent physics
+            scene.attach(tank.turretGroup);
+            
+            particles.push({
+                mesh: tank.turretGroup,
+                velocity: new THREE.Vector3(
+                    (Math.random() - 0.5) * 15,
+                    Math.random() * 25 + 25, // Pop up into the air
+                    (Math.random() - 0.5) * 15
+                ),
+                rotSpeed: new THREE.Vector3(
+                    (Math.random() - 0.5) * 5,
+                    (Math.random() - 0.5) * 5,
+                    (Math.random() - 0.5) * 5
+                ),
+                life: 10.0, // Lasts 10 seconds before despawning
+                maxLife: 10.0,
+                isDebris: true // Custom flag so it doesn't shrink like normal smoke particles
+            });
+        }
+
         if (tank.isPlayer) {
             isPlaying = false;
-            if (turretAudio) turretAudio.pause(); // Silence the motor when destroyed
+            if (engineSynthGain && audioCtx) engineSynthGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1); // Silence engine
             document.exitPointerLock();
             document.getElementById('game-over').style.display = 'block';
             document.getElementById('final-score').innerText = score;
