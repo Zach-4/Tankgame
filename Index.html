@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Tank Battle Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky blue fallback */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.7);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background-color: red;
+            border-radius: 50%;
+        }
+        #hud {
+            padding: 20px;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+            display: flex;
+            justify-content: space-between;
+        }
+        .hud-box {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        #health-bar-container {
+            width: 200px;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 5px;
+            border: 2px solid #222;
+        }
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #ff3333, #44ff44);
+            transition: width 0.2s;
+        }
+        #menu {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            pointer-events: auto;
+            z-index: 10;
+        }
+        #menu h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            color: #ffaa00;
+        }
+        #menu p {
+            font-size: 1.2rem;
+            max-width: 600px;
+            text-align: center;
+            line-height: 1.5;
+            color: #ccc;
+        }
+        .controls-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .controls-info span {
+            color: #ffaa00;
+            font-weight: bold;
+        }
+        #start-btn {
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            background: #ffaa00;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.1s, background 0.2s;
+        }
+        #start-btn:hover {
+            background: #ffcc00;
+            transform: scale(1.05);
+        }
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 40px;
+            border-radius: 10px;
+            border: 2px solid #ff3333;
+            color: white;
+            z-index: 20;
+            pointer-events: auto;
+        }
+        #game-over h2 {
+            color: #ff3333;
+            font-size: 3rem;
+            margin-top: 0;
+        }
+        #restart-btn {
+            margin-top: 20px;
+            padding: 10px 30px;
+            font-size: 1.2rem;
+            cursor: pointer;
+        }
+        
+        /* Hit marker animation */
+        @keyframes hitMarkerAnim {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+        }
+        .hit-marker {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 30px;
+            height: 30px;
+            background-image: linear-gradient(45deg, transparent 45%, white 45%, white 55%, transparent 55%), linear-gradient(-45deg, transparent 45%, white 45%, white 55%, transparent 55%);
+            pointer-events: none;
+            opacity: 0;
+            z-index: 5;
+        }
+        .show-hit {
+            animation: hitMarkerAnim 0.3s ease-out;
+        }
+
+        /* NEW CSS for Armor Angling/Ricochet */
+        #bounce-indicator {
+            position: absolute;
+            top: 60%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #dddddd;
+            font-weight: bold;
+            font-size: 1.5rem;
+            text-shadow: 2px 2px 0px #000;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 5;
+        }
+        .show-bounce {
+            animation: bounceAnim 1s ease-out;
+        }
+        @keyframes bounceAnim {
+            0% { transform: translate(-50%, -30%); opacity: 1; }
+            100% { transform: translate(-50%, -80%); opacity: 0; }
+        }
+
+        /* NEW CSS for Aiming */
+        #gun-reticle {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 5;
+            transition: border-color 0.1s;
+        }
+        #gun-reticle::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+        }
+        #sniper-overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, transparent 25%, rgba(0,0,0,0.95) 75%);
+            pointer-events: none;
+            z-index: 4;
+        }
+        #sniper-overlay .line-h { position: absolute; top: 50%; left: 10%; width: 80%; height: 1px; background: rgba(0,0,0,0.8); }
+        #sniper-overlay .line-v { position: absolute; top: 10%; left: 50%; width: 1px; height: 80%; background: rgba(0,0,0,0.8); }
+    </style>
+    <!-- Include Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <div id="hud">
+            <div class="hud-box">
+                <div>Integrity</div>
+                <div id="health-bar-container">
+                    <div id="health-bar"></div>
+                </div>
+            </div>
+            <div class="hud-box" style="text-align: right;">
+                <div style="font-size: 1.2rem;">Enemies Destroyed: <span id="score-val" style="color:#ffaa00; font-weight:bold;">0</span></div>
+                <div id="ammo-status" style="margin-top: 5px; color: #aaa;">Ready to fire</div>
+            </div>
+        </div>
+        <div id="crosshair"></div>
+        <div id="hit-indicator" class="hit-marker"></div>
+        <div id="bounce-indicator">RICOCHET</div>
+        
+        <!-- NEW Aiming UI -->
+        <div id="gun-reticle"></div>
+        <div id="sniper-overlay">
+            <div class="line-h"></div>
+            <div class="line-v"></div>
+        </div>
+    </div>
+
+    <div id="menu">
+        <h1>STEEL BEASTS</h1>
+        <p>A 3D Tank Combat Simulator</p>
+        <div class="controls-info">
+            <div><span>W / S</span> - Drive Forward / Backward</div>
+            <div><span>A / D</span> - Steer Hull Left / Right</div>
+            <div><span>Mouse</span> - Aim Turret</div>
+            <div><span>Left Click</span> - Fire Main Gun</div>
+            <div><span>Shift</span> - Toggle Sniper Sight</div>
+        </div>
+        <button id="start-btn">ENGAGE</button>
+    </div>
+
+    <div id="game-over">
+        <h2>VEHICLE DESTROYED</h2>
+        <p>Your tank was disabled.</p>
+        <p>Final Score: <span id="final-score">0</span></p>
+        <button id="restart-btn" onclick="location.reload()">Return to Base</button>
+    </div>
+
+<script>
+    // --- Configuration & Globals ---
+    const CONFIG = {
+        playerSpeed: 12,
+        playerTurnSpeed: 1.5,
+        turretSpeed: 2.0, // How fast turret tracks the camera look point
+        reloadTime: 3.5, // Player reload time in seconds
+        enemyReloadTime: 4.0, // Enemy reload time in seconds (slower)
+        projectileSpeed: 100, // Enemy projectile speed
+        playerProjectileSpeed: 300, // Tiger 88mm high-velocity gun (less drop)
+        gravity: 9.8 * 2,
+        worldSize: 400,
+        enemyCount: 6,
+        colors: {
+            playerTank: 0x4a5d23, // Olive green
+            enemyTank: 0x555555,  // Dark grey
+            track: 0x222222,
+            barrel: 0x333333,
+            ground: 0x6b8e23,     // Grass
+            obstacle: 0x8b7355      // Wood/Dirt brown
+        }
+    };
+
+    let scene, camera, renderer, clock;
+    let player, cameraRig;
+    let enemies = [];
+    let projectiles = [];
+    let particles = [];
+    let obstacles = [];
+    
+    let isPlaying = false;
+    let score = 0;
+    
+    // Aiming & Camera Globals
+    let isSniperMode = false;
+    const raycaster = new THREE.Raycaster();
+    const centerScreen = new THREE.Vector2(0, 0);
+
+    // Input state
+    const keys = { w: false, a: false, s: false, d: false };
+    let mouseMovement = { x: 0, y: 0 };
+    
+    // UI Elements
+    const healthBar = document.getElementById('health-bar');
+    const scoreVal = document.getElementById('score-val');
+    const ammoStatus = document.getElementById('ammo-status');
+    const hitIndicator = document.getElementById('hit-indicator');
+    const bounceIndicator = document.getElementById('bounce-indicator');
+
+    // Audio Elements
+    let turretAudio;
+
+    // --- Initialization ---
+    function init() {
+        const container = document.getElementById('canvas-container');
+        
+        // Scene setup
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.004);
+
+        // Camera setup
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // Camera Rig (handles 3rd person orbiting independent of hull)
+        cameraRig = new THREE.Object3D();
+        cameraRig.rotation.order = "YXZ";
+        scene.add(cameraRig);
+        
+        // Attach camera to rig
+        cameraRig.add(camera);
+        camera.position.set(-0.6, 1.4, -0.4); // Commander's POV (on cupola)
+        camera.rotation.set(0, 0, 0); // Look straight ahead relative to rig
+
+        // Renderer setup
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        clock = new THREE.Clock();
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(100, 200, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 500;
+        const d = 150;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        scene.add(dirLight);
+
+        // Environment
+        createEnvironment();
+
+        // Player
+        player = createTank(true);
+        scene.add(player.group);
+
+        // Enemies
+        for(let i=0; i<CONFIG.enemyCount; i++) {
+            spawnEnemy();
+        }
+
+        // Event Listeners
+        window.addEventListener('resize', onWindowResize);
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'shift' && !e.repeat) {
+                isSniperMode = !isSniperMode;
+                updateCameraMode();
+            }
+            handleKey(e.key.toLowerCase(), true);
+        });
+        document.addEventListener('keyup', (e) => handleKey(e.key.toLowerCase(), false));
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mousedown', onMouseDown);
+
+        // Initialize Audio
+        turretAudio = new Audio('tank-turret-rotate-14879 (1).mp3');
+        turretAudio.loop = true;
+        turretAudio.volume = 0.5;
+
+        // UI Setup
+        document.getElementById('start-btn').addEventListener('click', () => {
+            // Unlock audio on first user click (browsers block audio until direct interaction)
+            turretAudio.play().then(() => {
+                turretAudio.pause();
+            }).catch(e => {});
+
+            document.body.requestPointerLock();
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement === document.body) {
+                document.getElementById('menu').style.display = 'none';
+                if(player.health > 0) isPlaying = true;
+            } else {
+                if(player.health > 0) document.getElementById('menu').style.display = 'flex';
+                isPlaying = false;
+                if (turretAudio) turretAudio.pause(); // Pause audio if menu opens
+            }
+        });
+
+        // Start Loop
+        animate();
+    }
+
+    // --- Object Creation ---
+
+    function createEnvironment() {
+        // Ground
+        const groundGeo = new THREE.PlaneGeometry(CONFIG.worldSize, CONFIG.worldSize);
+        const groundMat = new THREE.MeshLambertMaterial({ color: CONFIG.colors.ground });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        ground.userData.isRaycastTarget = true; // Tagged for aiming
+        scene.add(ground);
+
+        // Grid helper for scale
+        const grid = new THREE.GridHelper(CONFIG.worldSize, 100, 0x000000, 0x000000);
+        grid.material.opacity = 0.1;
+        grid.material.transparent = true;
+        grid.position.y = 0.01;
+        scene.add(grid);
+
+        // Obstacles
+        const obsGeo = new THREE.BoxGeometry(1, 1, 1);
+        const obsMat = new THREE.MeshLambertMaterial({ color: CONFIG.colors.obstacle });
+        
+        for(let i=0; i<40; i++) {
+            const mesh = new THREE.Mesh(obsGeo, obsMat);
+            const w = Math.random() * 8 + 4;
+            const h = Math.random() * 5 + 2;
+            const d = Math.random() * 8 + 4;
+            
+            mesh.scale.set(w, h, d);
+            
+            // Avoid spawning in center (player start)
+            let x, z;
+            do {
+                x = (Math.random() - 0.5) * (CONFIG.worldSize - 20);
+                z = (Math.random() - 0.5) * (CONFIG.worldSize - 20);
+            } while (Math.abs(x) < 20 && Math.abs(z) < 20);
+
+            mesh.position.set(x, h/2, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData.isRaycastTarget = true; // Tagged for aiming
+            
+            // Bounding box for collision
+            mesh.geometry.computeBoundingBox();
+            
+            scene.add(mesh);
+            obstacles.push({
+                mesh: mesh,
+                box: new THREE.Box3().setFromObject(mesh)
+            });
+        }
+    }
+
+    function createTank(isPlayer) {
+        const tank = {
+            isPlayer: isPlayer,
+            health: isPlayer ? 100 : 50,
+            maxHealth: isPlayer ? 100 : 50,
+            speed: 0,
+            lastFired: 0,
+            recoilTimer: 0,
+            group: new THREE.Group(),
+            hull: new THREE.Group(),
+            turretGroup: new THREE.Group(),
+            aiState: 'patrol',
+            aiTimer: 0,
+            targetPos: new THREE.Vector3()
+        };
+
+        const darkMat = new THREE.MeshLambertMaterial({ color: CONFIG.colors.track });
+        const metalMat = new THREE.MeshLambertMaterial({ color: 0x444444 });
+
+        if (isPlayer) {
+            // --- TIGER TANK MODEL (Player) ---
+            const color = 0xd2b48c; // Desert Tan / Dunkelgelb
+            const mat = new THREE.MeshLambertMaterial({ color: color });
+
+            // Hull
+            const hullGeo = new THREE.BoxGeometry(3.4, 1.4, 6.2);
+            const hullMesh = new THREE.Mesh(hullGeo, mat);
+            hullMesh.position.y = 1.2;
+            hullMesh.castShadow = true;
+            hullMesh.receiveShadow = true;
+            hullMesh.userData.isRaycastTarget = true; hullMesh.userData.isPlayer = true; // Tagged
+            tank.hull.add(hullMesh);
+
+            // Detailed Tracks
+            const trackGeo = new THREE.BoxGeometry(0.9, 1.2, 6.6);
+            const leftTrack = new THREE.Mesh(trackGeo, darkMat);
+            leftTrack.position.set(-2.0, 0.8, 0);
+            leftTrack.castShadow = true;
+            const rightTrack = new THREE.Mesh(trackGeo, darkMat);
+            rightTrack.position.set(2.0, 0.8, 0);
+            rightTrack.castShadow = true;
+            tank.hull.add(leftTrack);
+            tank.hull.add(rightTrack);
+
+            // Add road wheels to tracks for better looks
+            const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.0, 16);
+            wheelGeo.rotateZ(Math.PI / 2);
+            for(let i=0; i<5; i++) {
+                const zPos = -2.2 + (i * 1.1);
+                const lw = new THREE.Mesh(wheelGeo, metalMat);
+                lw.position.set(-2.0, 0.4, zPos);
+                tank.hull.add(lw);
+                const rw = new THREE.Mesh(wheelGeo, metalMat);
+                rw.position.set(2.0, 0.4, zPos);
+                tank.hull.add(rw);
+            }
+
+            // Turret
+            tank.turretGroup.position.set(0, 2.0, 0.5); // Shifted back
+            const turretGeo = new THREE.BoxGeometry(2.4, 1.2, 2.8);
+            const turretMesh = new THREE.Mesh(turretGeo, mat);
+            turretMesh.castShadow = true;
+            turretMesh.receiveShadow = true;
+            turretMesh.userData.isRaycastTarget = true; turretMesh.userData.isPlayer = true; // Tagged
+            tank.turretGroup.add(turretMesh);
+
+            // Commander Cupola
+            const cupolaGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.4, 12);
+            const cupola = new THREE.Mesh(cupolaGeo, mat);
+            cupola.position.set(-0.6, 0.8, -0.4);
+            tank.turretGroup.add(cupola);
+
+            // Gun Pivot
+            tank.gunPivot = new THREE.Group();
+            tank.gunPivot.position.set(0, 0, -1.4); // Front of turret (facing -Z)
+            tank.turretGroup.add(tank.gunPivot);
+
+            // Mantlet
+            const mantletGeo = new THREE.BoxGeometry(1.2, 0.8, 1.0);
+            const mantlet = new THREE.Mesh(mantletGeo, mat);
+            mantlet.castShadow = true;
+            tank.gunPivot.add(mantlet);
+
+            // 88mm Barrel
+            const barrelGeo = new THREE.CylinderGeometry(0.12, 0.16, 4.5, 12);
+            barrelGeo.rotateX(Math.PI / 2);
+            barrelGeo.translate(0, 0, -2.25); // Extend down -Z
+            tank.barrelMesh = new THREE.Mesh(barrelGeo, metalMat);
+            tank.barrelMesh.castShadow = true;
+            tank.gunPivot.add(tank.barrelMesh);
+
+            // Muzzle Brake
+            const brakeGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.6, 12);
+            brakeGeo.rotateX(Math.PI / 2);
+            brakeGeo.translate(0, 0, -4.6);
+            const brake = new THREE.Mesh(brakeGeo, metalMat);
+            tank.barrelMesh.add(brake); // Attach to barrel so it recoils
+
+            tank.firePoint = new THREE.Object3D();
+            tank.firePoint.position.set(0, 0, -5.0);
+            tank.gunPivot.add(tank.firePoint);
+
+            tank.radius = 4.0;
+            
+        } else {
+            // --- ENEMY TANK MODEL (Generic Medium) ---
+            const color = CONFIG.colors.enemyTank;
+            const mat = new THREE.MeshLambertMaterial({ color: color });
+
+            const hullGeo = new THREE.BoxGeometry(3, 1.3, 5.5);
+            const hullMesh = new THREE.Mesh(hullGeo, mat);
+            hullMesh.position.y = 1.1;
+            hullMesh.castShadow = true;
+            hullMesh.receiveShadow = true;
+            hullMesh.userData.isRaycastTarget = true; hullMesh.userData.isEnemy = true; // Tagged
+            tank.hull.add(hullMesh);
+
+            const trackGeo = new THREE.BoxGeometry(0.8, 1.1, 5.8);
+            const leftTrack = new THREE.Mesh(trackGeo, darkMat);
+            leftTrack.position.set(-1.8, 0.7, 0);
+            leftTrack.castShadow = true;
+            const rightTrack = new THREE.Mesh(trackGeo, darkMat);
+            rightTrack.position.set(1.8, 0.7, 0);
+            rightTrack.castShadow = true;
+            tank.hull.add(leftTrack);
+            tank.hull.add(rightTrack);
+
+            tank.turretGroup.position.set(0, 1.8, 0.2);
+            
+            // Octagonal turret
+            const turretGeo = new THREE.CylinderGeometry(1.4, 1.5, 1.0, 8);
+            const turretMesh = new THREE.Mesh(turretGeo, mat);
+            turretMesh.castShadow = true;
+            turretMesh.receiveShadow = true;
+            turretMesh.userData.isRaycastTarget = true; turretMesh.userData.isEnemy = true; // Tagged
+            tank.turretGroup.add(turretMesh);
+
+            tank.gunPivot = new THREE.Group();
+            tank.gunPivot.position.set(0, 0, -1.2);
+            tank.turretGroup.add(tank.gunPivot);
+
+            const barrelGeo = new THREE.CylinderGeometry(0.1, 0.14, 3.5, 10);
+            barrelGeo.rotateX(Math.PI / 2);
+            barrelGeo.translate(0, 0, -1.75);
+            tank.barrelMesh = new THREE.Mesh(barrelGeo, metalMat);
+            tank.barrelMesh.castShadow = true;
+            tank.gunPivot.add(tank.barrelMesh);
+
+            tank.firePoint = new THREE.Object3D();
+            tank.firePoint.position.set(0, 0, -3.6);
+            tank.gunPivot.add(tank.firePoint);
+
+            tank.radius = 3.5;
+        }
+
+        tank.group.add(tank.hull);
+        tank.group.add(tank.turretGroup);
+
+        return tank;
+    }
+
+    function spawnEnemy() {
+        const enemy = createTank(false);
+        
+        let x, z;
+        do {
+            x = (Math.random() - 0.5) * (CONFIG.worldSize - 40);
+            z = (Math.random() - 0.5) * (CONFIG.worldSize - 40);
+        } while (Math.sqrt(x*x + z*z) < 40); // Keep away from center initially
+
+        enemy.group.position.set(x, 0, z);
+        
+        // Random initial rotation
+        enemy.hull.rotation.y = Math.random() * Math.PI * 2;
+        enemy.turretGroup.rotation.y = enemy.hull.rotation.y;
+
+        scene.add(enemy.group);
+        enemies.push(enemy);
+    }
+
+    // --- Input Handling ---
+
+    function handleKey(key, isDown) {
+        if (keys.hasOwnProperty(key)) {
+            keys[key] = isDown;
+        }
+    }
+
+    function onMouseMove(event) {
+        if (!isPlaying) return;
+        
+        // Accumulate mouse movement for camera rig
+        const sensitivity = 0.002;
+        cameraRig.rotation.y -= event.movementX * sensitivity;
+        cameraRig.rotation.x -= event.movementY * sensitivity;
+        
+        // Clamp camera pitch (Expanded for 1st person commander view)
+        cameraRig.rotation.x = Math.max(-Math.PI/3, Math.min(Math.PI/3, cameraRig.rotation.x));
+    }
+
+    function onMouseDown(event) {
+        if (!isPlaying || event.button !== 0) return;
+        fireProjectile(player);
+    }
+
+    function fireProjectile(tankObj) {
+        const now = clock.getElapsedTime();
+        const currentReloadTime = tankObj.isPlayer ? CONFIG.reloadTime : CONFIG.enemyReloadTime;
+        
+        if (now - tankObj.lastFired < currentReloadTime) return;
+
+        tankObj.lastFired = now;
+        tankObj.recoilTimer = 0.2; // 200ms recoil animation
+
+        // Visual Effects: Muzzle flash
+        createExplosion(tankObj.firePoint.getWorldPosition(new THREE.Vector3()), 0xffaa00, 10, 0.5);
+
+        // Create Projectile
+        const projGeo = new THREE.SphereGeometry(0.2, 8, 8);
+        const projMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+        const mesh = new THREE.Mesh(projGeo, projMat);
+        
+        // Get firing position and direction
+        const startPos = new THREE.Vector3();
+        tankObj.firePoint.getWorldPosition(startPos);
+        
+        const direction = new THREE.Vector3(0, 0, -1);
+        direction.applyQuaternion(tankObj.firePoint.getWorldQuaternion(new THREE.Quaternion()));
+        direction.normalize();
+
+        mesh.position.copy(startPos);
+        scene.add(mesh);
+
+        const speed = tankObj.isPlayer ? CONFIG.playerProjectileSpeed : CONFIG.projectileSpeed;
+
+        projectiles.push({
+            mesh: mesh,
+            velocity: direction.multiplyScalar(speed),
+            owner: tankObj,
+            life: 3.0 // seconds before auto-destroy
+        });
+
+        if (tankObj.isPlayer) {
+            ammoStatus.innerText = "Reloading...";
+            ammoStatus.style.color = "#ff3333";
+            setTimeout(() => {
+                if(isPlaying) {
+                    ammoStatus.innerText = "Ready to fire";
+                    ammoStatus.style.color = "#aaa";
+                }
+            }, CONFIG.reloadTime * 1000);
+        }
+    }
+
+    function updateCameraMode() {
+        if (isSniperMode) {
+            camera.position.set(0, 0.6, -1.4); // Sniper sight (near gun barrel)
+            camera.rotation.set(0, 0, 0);
+            camera.fov = 20; // Zoomed in sight
+            document.getElementById('sniper-overlay').style.display = 'block';
+            document.getElementById('crosshair').style.display = 'none';
+        } else {
+            camera.position.set(-0.6, 1.4, -0.4); // Commander's cupola
+            camera.rotation.set(0, 0, 0);
+            camera.fov = 70; // Wider FOV for situational awareness
+            document.getElementById('sniper-overlay').style.display = 'none';
+            document.getElementById('crosshair').style.display = 'block';
+        }
+        camera.updateProjectionMatrix();
+    }
+
+    // --- Update Logic ---
+
+    function updatePlayer(dt) {
+        if (player.health <= 0) return;
+
+        // --- Hull Movement ---
+        // Acceleration
+        let moveDir = 0;
+        if (keys.w) moveDir += 1;
+        if (keys.s) moveDir -= 1;
+        
+        // Target speed
+        let targetSpeed = moveDir * CONFIG.playerSpeed;
+        player.speed += (targetSpeed - player.speed) * 5 * dt;
+
+        // Turning
+        if (Math.abs(player.speed) > 0.1) {
+            let turnDir = 0;
+            if (keys.a) turnDir += 1;
+            if (keys.d) turnDir -= 1;
+            
+            // Reverse turn direction if going backward for intuitive steering
+            let sign = player.speed > 0 ? 1 : -1;
+            player.hull.rotation.y += turnDir * CONFIG.playerTurnSpeed * sign * dt;
+        }
+
+        // Apply movement vector relative to hull rotation
+        const movement = new THREE.Vector3(0, 0, -1);
+        movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.hull.rotation.y);
+        movement.multiplyScalar(player.speed * dt);
+
+        // Predict next position for collision
+        const nextPos = player.group.position.clone().add(movement);
+        if (!checkEnvironmentCollision(nextPos, player.radius)) {
+            player.group.position.copy(nextPos);
+        }
+
+        // --- Turret Aiming (War Thunder Style) ---
+        // 1. Raycast from camera to find exact point the player is looking at
+        raycaster.setFromCamera(centerScreen, camera);
+        // FIX: Added '!h.object.userData.isPlayer' so the camera ignores your own tank
+        const lookHits = raycaster.intersectObjects(scene.children, true).filter(h => 
+            h.object.userData.isRaycastTarget && !h.object.userData.isPlayer
+        );
+        
+        let aimTarget = new THREE.Vector3();
+        if (lookHits.length > 0) {
+            aimTarget.copy(lookHits[0].point);
+        } else {
+            // Default aiming far into the sky if pointing up
+            aimTarget.copy(raycaster.ray.direction).multiplyScalar(1000).add(raycaster.ray.origin);
+        }
+
+        // 2. Rotate Turret (Yaw) to track the world point
+        const localTarget = tankWorldToLocal(player.group, aimTarget);
+        const targetYaw = Math.atan2(localTarget.x, localTarget.z) + Math.PI;
+        
+        const prevYaw = player.turretGroup.rotation.y;
+        player.turretGroup.rotation.y = lerpAngle(player.turretGroup.rotation.y, targetYaw, CONFIG.turretSpeed * dt);
+
+        // 3. Rotate Gun (Pitch) to track the world point
+        const localTurretTarget = tankWorldToLocal(player.turretGroup, aimTarget);
+        const targetPitch = Math.atan2(localTurretTarget.y, -localTurretTarget.z);
+        const clampedPitch = Math.max(-Math.PI/18, Math.min(Math.PI/9, targetPitch));
+        
+        const prevPitch = player.gunPivot.rotation.x;
+        player.gunPivot.rotation.x = lerpAngle(player.gunPivot.rotation.x, clampedPitch, CONFIG.turretSpeed * 2 * dt);
+
+        // --- Turret Rotation Audio Logic ---
+        const yawDiff = Math.abs(normalizeAngle(player.turretGroup.rotation.y - prevYaw));
+        const pitchDiff = Math.abs(player.gunPivot.rotation.x - prevPitch);
+        
+        // Increase threshold slightly to avoid micro-stuttering and play() interruptions
+        const isTurretMoving = (yawDiff > 0.001 || pitchDiff > 0.001);
+        
+        if (isTurretMoving) {
+            // Play if it is moving significantly
+            if (turretAudio.paused) {
+                const playPromise = turretAudio.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(e => {}); // Catch interruption errors smoothly
+                }
+            }
+        } else {
+            // Stop playing once it locks onto the target
+            if (!turretAudio.paused) {
+                turretAudio.pause();
+            }
+        }
+
+        // 4. Evaluate actual gun resting position for UI Reticle
+        const gunOrigin = new THREE.Vector3();
+        player.firePoint.getWorldPosition(gunOrigin);
+        const gunDir = new THREE.Vector3(0, 0, -1).applyQuaternion(player.firePoint.getWorldQuaternion(new THREE.Quaternion()));
+        
+        raycaster.set(gunOrigin, gunDir);
+        // Exclude our own player tank from blocking the barrel raycast
+        const gunHits = raycaster.intersectObjects(scene.children, true).filter(h => 
+            h.object.userData.isRaycastTarget && !h.object.userData.isPlayer
+        );
+        
+        let gunHitPos = new THREE.Vector3();
+        if (gunHits.length > 0) {
+            gunHitPos.copy(gunHits[0].point);
+        } else {
+            gunHitPos.copy(gunDir).multiplyScalar(1000).add(gunOrigin);
+        }
+
+        // Project the 3D gun target to 2D screen coordinates
+        const projectedPos = gunHitPos.clone().project(camera);
+        const gunReticle = document.getElementById('gun-reticle');
+        
+        if (projectedPos.z < 1) { // Means it's in front of the camera
+            const x = (projectedPos.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (projectedPos.y * -0.5 + 0.5) * window.innerHeight;
+            gunReticle.style.display = 'block';
+            gunReticle.style.left = x + 'px';
+            gunReticle.style.top = y + 'px';
+            
+            // Turn reticle red if pointing exactly at an enemy
+            if (gunHits.length > 0 && gunHits[0].object.userData.isEnemy) {
+                gunReticle.style.borderColor = '#ff3333';
+            } else {
+                gunReticle.style.borderColor = 'rgba(255, 255, 255, 0.8)';
+            }
+        } else {
+            gunReticle.style.display = 'none'; // Behind camera
+        }
+
+        // --- Camera Follow ---
+        const targetRigPos = new THREE.Vector3();
+        // Anchor firmly to the turret for 1st person perspective
+        player.turretGroup.getWorldPosition(targetRigPos);
+        cameraRig.position.copy(targetRigPos);
+
+        // --- Recoil Animation ---
+        if (player.recoilTimer > 0) {
+            player.recoilTimer -= dt;
+            const recoilAmt = Math.sin((player.recoilTimer / 0.2) * Math.PI) * 0.5;
+            player.barrelMesh.position.z = recoilAmt;
+        } else {
+            player.barrelMesh.position.z = 0;
+        }
+    }
+
+    function updateEnemies(dt) {
+        enemies.forEach((enemy, index) => {
+            if (enemy.health <= 0) return;
+
+            enemy.aiTimer -= dt;
+            const distToPlayer = enemy.group.position.distanceTo(player.group.position);
+
+            // Basic State Machine
+            if (enemy.aiTimer <= 0) {
+                if (distToPlayer < 80) {
+                    enemy.aiState = 'attack';
+                    enemy.aiTimer = 1 + Math.random(); // Re-evaluate soon
+                } else {
+                    enemy.aiState = 'patrol';
+                    enemy.aiTimer = 3 + Math.random() * 4;
+                    // Pick a random direction
+                    enemy.targetPos.set(
+                        enemy.group.position.x + (Math.random() - 0.5) * 60,
+                        0,
+                        enemy.group.position.z + (Math.random() - 0.5) * 60
+                    );
+                }
+            }
+
+            if (enemy.aiState === 'patrol') {
+                // Move towards target pos
+                const dir = enemy.targetPos.clone().sub(enemy.group.position).normalize();
+                const targetYaw = Math.atan2(dir.x, dir.z) + Math.PI;
+                
+                enemy.hull.rotation.y = lerpAngle(enemy.hull.rotation.y, targetYaw, CONFIG.playerTurnSpeed * dt);
+                enemy.turretGroup.rotation.y = lerpAngle(enemy.turretGroup.rotation.y, 0, dt); // Face forward
+                enemy.gunPivot.rotation.x = lerpAngle(enemy.gunPivot.rotation.x, 0, dt);
+
+                enemy.speed = 5;
+            } 
+            else if (enemy.aiState === 'attack') {
+                enemy.speed = 0; // Stop to shoot
+
+                // Aim at player
+                // Aim a bit high to account for gravity/distance (simple heuristic)
+                const targetPos = player.group.position.clone();
+                targetPos.y += 1.5; 
+
+                const localTarget = tankWorldToLocal(enemy.group, targetPos);
+                const targetYaw = Math.atan2(localTarget.x, localTarget.z) + Math.PI;
+                enemy.turretGroup.rotation.y = lerpAngle(enemy.turretGroup.rotation.y, targetYaw, CONFIG.turretSpeed * dt);
+
+                const localTurretTarget = tankWorldToLocal(enemy.turretGroup, targetPos);
+                const targetPitch = Math.atan2(localTurretTarget.y, -localTurretTarget.z);
+                enemy.gunPivot.rotation.x = lerpAngle(enemy.gunPivot.rotation.x, targetPitch, CONFIG.turretSpeed * dt);
+
+                // Fire if roughly aimed
+                const angleDiff = Math.abs(normalizeAngle(enemy.turretGroup.rotation.y - targetYaw));
+                if (angleDiff < 0.1 && distToPlayer < 100 && player.health > 0) {
+                    fireProjectile(enemy);
+                }
+            }
+
+            // Apply movement
+            if (enemy.speed > 0) {
+                const movement = new THREE.Vector3(0, 0, -1);
+                movement.applyAxisAngle(new THREE.Vector3(0, 1, 0), enemy.hull.rotation.y);
+                movement.multiplyScalar(enemy.speed * dt);
+
+                const nextPos = enemy.group.position.clone().add(movement);
+                
+                // Keep in bounds
+                const limit = CONFIG.worldSize / 2 - 5;
+                if(nextPos.x > limit || nextPos.x < -limit || nextPos.z > limit || nextPos.z < -limit) {
+                   enemy.aiTimer = 0; // Force new path
+                } else if (!checkEnvironmentCollision(nextPos, enemy.radius)) {
+                    enemy.group.position.copy(nextPos);
+                } else {
+                    enemy.aiTimer = 0; // Hit obstacle, pick new path
+                }
+            }
+
+            // Recoil
+            if (enemy.recoilTimer > 0) {
+                enemy.recoilTimer -= dt;
+                enemy.barrelMesh.position.z = Math.sin((enemy.recoilTimer / 0.2) * Math.PI) * 0.5;
+            } else {
+                enemy.barrelMesh.position.z = 0;
+            }
+        });
+    }
+
+    function updateProjectiles(dt) {
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p = projectiles[i];
+            
+            p.life -= dt;
+            if (p.life <= 0) {
+                removeProjectile(i);
+                continue;
+            }
+
+            // Apply gravity
+            p.velocity.y -= CONFIG.gravity * dt;
+
+            // Move
+            const step = p.velocity.clone().multiplyScalar(dt);
+            const nextPos = p.mesh.position.clone().add(step);
+
+            // Raycast for collision (continuous collision detection)
+            let hit = false;
+            let hitPos = null;
+            let hitType = 'none'; // 'none', 'env', 'tank', 'bounce'
+
+            // 1. Ground collision
+            if (nextPos.y <= 0) {
+                hit = true;
+                hitType = 'env';
+                hitPos = nextPos;
+                hitPos.y = 0;
+            }
+
+            // 2. Obstacle collision
+            if(!hit) {
+                for(let obs of obstacles) {
+                    if(obs.box.containsPoint(nextPos)) {
+                        hit = true;
+                        hitType = 'env';
+                        hitPos = nextPos;
+                        break;
+                    }
+                }
+            }
+
+            // 3. Tank collision
+            if(!hit) {
+                const allTanks = [player, ...enemies];
+                for (let tank of allTanks) {
+                    if (tank.health <= 0 || p.owner === tank) continue;
+
+                    // Simple sphere collision
+                    if (nextPos.distanceTo(tank.group.position) < tank.radius) {
+                        hit = true;
+                        hitPos = nextPos;
+                        
+                        // --- ARMOR ANGLING LOGIC ---
+                        // Convert projectile velocity to the tank hull's local space
+                        const hullQuat = new THREE.Quaternion();
+                        tank.hull.getWorldQuaternion(hullQuat);
+                        const localVel = p.velocity.clone().normalize().applyQuaternion(hullQuat.invert());
+                        
+                        // Calculate angle off the main axes (X=side, Z=front/back)
+                        // 0 degrees = flat on front/back, 90 degrees = flat on side
+                        const angleDeg = Math.atan2(Math.abs(localVel.x), Math.abs(localVel.z)) * (180 / Math.PI);
+                        
+                        // If hitting the corners/angled hull (between 30 and 60 degrees from flat)
+                        const isAngled = (angleDeg > 30 && angleDeg < 60);
+
+                        if (isAngled && Math.random() < 0.8) {
+                            hitType = 'bounce';
+                            if (p.owner.isPlayer) {
+                                showBounceMarker("RICOCHET!");
+                            } else if (tank.isPlayer) {
+                                showBounceMarker("ARMOR ANGLED!");
+                            }
+                        } else {
+                            hitType = 'tank';
+                            // Apply Damage
+                            tank.health -= 25; // 4 hits to kill player, 2 for enemy
+                            
+                            if (p.owner.isPlayer) {
+                                showHitMarker();
+                            }
+
+                            if (tank.health <= 0) {
+                                destroyTank(tank);
+                                if(p.owner.isPlayer && !tank.isPlayer) {
+                                    score++;
+                                    scoreVal.innerText = score;
+                                }
+                            } else if (tank.isPlayer) {
+                                updateHUD();
+                            }
+                        }
+                        break; // Stop checking other tanks
+                    }
+                }
+            }
+
+            if (hit) {
+                if (hitType === 'bounce') {
+                    createExplosion(hitPos, 0xffffff, 10, 0.5); // White sparks for ricochet
+                } else if (hitType === 'tank') {
+                    createExplosion(hitPos, 0xff5500, 20, 1.5); // Normal fiery explosion
+                } else {
+                    createExplosion(hitPos, 0x8b7355, 15, 1.0); // Dirt/wood debris for environment
+                }
+                removeProjectile(i);
+            } else {
+                p.mesh.position.copy(nextPos);
+            }
+        }
+    }
+
+    function removeProjectile(index) {
+        scene.remove(projectiles[index].mesh);
+        projectiles.splice(index, 1);
+    }
+
+    function updateParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life -= dt;
+            if (p.life <= 0) {
+                scene.remove(p.mesh);
+                particles.splice(i, 1);
+                continue;
+            }
+
+            p.velocity.y -= CONFIG.gravity * 0.5 * dt;
+            p.mesh.position.add(p.velocity.clone().multiplyScalar(dt));
+            p.mesh.rotation.x += p.rotSpeed.x * dt;
+            p.mesh.rotation.y += p.rotSpeed.y * dt;
+            
+            // Fade out/shrink
+            const scale = p.life / p.maxLife;
+            p.mesh.scale.set(scale, scale, scale);
+            if(p.mesh.material.transparent) {
+                p.mesh.material.opacity = scale;
+            }
+        }
+    }
+
+    // --- Helpers & Effects ---
+
+    function createExplosion(pos, colorStr, count, scaleMultiplier=1) {
+        const pGeo = new THREE.BoxGeometry(0.5 * scaleMultiplier, 0.5 * scaleMultiplier, 0.5 * scaleMultiplier);
+        const pMat = new THREE.MeshBasicMaterial({ color: colorStr });
+        const smokeMat = new THREE.MeshBasicMaterial({ color: 0x555555, transparent: true, opacity: 0.8 });
+
+        for (let i = 0; i < count; i++) {
+            const isSmoke = Math.random() > 0.4;
+            const mesh = new THREE.Mesh(pGeo, isSmoke ? smokeMat : pMat);
+            mesh.position.copy(pos);
+            scene.add(mesh);
+
+            const speed = (Math.random() * 15 + 5) * scaleMultiplier;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(Math.random() * 2 - 1); // Spherical distribution
+            
+            // Bias upwards
+            let vy = speed * Math.cos(phi) + 5;
+            if(vy < 0) vy *= -0.5;
+
+            particles.push({
+                mesh: mesh,
+                velocity: new THREE.Vector3(
+                    speed * Math.sin(phi) * Math.cos(theta),
+                    vy,
+                    speed * Math.sin(phi) * Math.sin(theta)
+                ),
+                rotSpeed: new THREE.Vector3(Math.random()*10, Math.random()*10, 0),
+                life: Math.random() * 0.5 + 0.5,
+                maxLife: 1.0
+            });
+        }
+    }
+
+    function destroyTank(tank) {
+        // Big explosion
+        createExplosion(tank.group.position, 0xff3300, 50, 2);
+        
+        // Turn mesh black/scorched
+        const scorchedMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+        tank.hull.children.forEach(c => { if(c.material) c.material = scorchedMat; });
+        tank.turretGroup.children.forEach(c => { if(c.material) c.material = scorchedMat; });
+        if(tank.barrelMesh) tank.barrelMesh.material = scorchedMat;
+        if(tank.barrelMesh && tank.barrelMesh.children.length > 0) tank.barrelMesh.children[0].material = scorchedMat; // For the muzzle brake
+
+        if (tank.isPlayer) {
+            isPlaying = false;
+            if (turretAudio) turretAudio.pause(); // Silence the motor when destroyed
+            document.exitPointerLock();
+            document.getElementById('game-over').style.display = 'block';
+            document.getElementById('final-score').innerText = score;
+            updateHUD();
+        } else {
+            // Spawn a replacement enemy after a delay
+            setTimeout(() => {
+                if(isPlaying) spawnEnemy();
+            }, 5000);
+        }
+    }
+
+    function updateHUD() {
+        const pct = Math.max(0, (player.health / player.maxHealth) * 100);
+        healthBar.style.width = pct + '%';
+        if (pct < 30) {
+            healthBar.style.background = '#ff3333';
+        } else if (pct < 60) {
+            healthBar.style.background = '#ffaa00';
+        } else {
+            healthBar.style.background = 'linear-gradient(90deg, #ff3333, #44ff44)';
+        }
+    }
+
+    function showHitMarker() {
+        hitIndicator.classList.remove('show-hit');
+        void hitIndicator.offsetWidth; // trigger reflow
+        hitIndicator.classList.add('show-hit');
+    }
+
+    function showBounceMarker(text) {
+        bounceIndicator.innerText = text;
+        bounceIndicator.classList.remove('show-bounce');
+        void bounceIndicator.offsetWidth; 
+        bounceIndicator.classList.add('show-bounce');
+    }
+
+    function checkEnvironmentCollision(pos, radius) {
+        // World boundaries
+        const limit = CONFIG.worldSize / 2;
+        if (pos.x + radius > limit || pos.x - radius < -limit ||
+            pos.z + radius > limit || pos.z - radius < -limit) {
+            return true;
+        }
+
+        // Obstacles (treat tank as point against expanded AABB for simplicity)
+        for (let obs of obstacles) {
+            // Simple AABB check expanding box by tank radius
+            if (pos.x > obs.box.min.x - radius && pos.x < obs.box.max.x + radius &&
+                pos.z > obs.box.min.z - radius && pos.z < obs.box.max.z + radius) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Math Helpers
+    function tankWorldToLocal(object, worldPos) {
+        const localPos = worldPos.clone();
+        object.worldToLocal(localPos);
+        return localPos;
+    }
+
+    function normalizeAngle(angle) {
+        while (angle > Math.PI) angle -= Math.PI * 2;
+        while (angle < -Math.PI) angle += Math.PI * 2;
+        return angle;
+    }
+
+    function lerpAngle(start, end, t) {
+        const diff = normalizeAngle(end - start);
+        return start + diff * t;
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // --- Main Loop ---
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const dt = Math.min(clock.getDelta(), 0.1); // Cap delta to prevent huge jumps on lag
+
+        if (isPlaying) {
+            updatePlayer(dt);
+            updateEnemies(dt);
+            updateProjectiles(dt);
+            updateParticles(dt);
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    // Boot
+    init();
+
+</script>
+</body>
+</html>
